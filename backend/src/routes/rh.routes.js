@@ -23,6 +23,7 @@ import {
   detailCandidature,
   lienCv,
   changerStatut,
+  relancerAnalyse,
 } from '../controllers/candidatures.controller.js';
 
 const router = express.Router();
@@ -43,6 +44,7 @@ router.delete('/offres/:id', supprimerOffre);         // supprimer définitiveme
 
 /* --- Gestion des candidatures (F15 à F18) --- */
 router.get('/offres/:id/candidatures', candidaturesParOffre); // candidatures d'une offre
+router.post('/offres/:id/analyser', relancerAnalyse);         // (re)lancer le Matching IA
 router.get('/candidatures', listerCandidatures);              // toutes, avec filtres
 router.get('/candidatures/:id', detailCandidature);           // détail d'une candidature
 router.get('/candidatures/:id/cv', lienCv);                   // lien temporaire vers le CV

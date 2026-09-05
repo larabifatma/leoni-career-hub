@@ -11,7 +11,9 @@ import {
   STATUTS_CANDIDATURE_VALIDES,
   TAILLE_PAGE_DEFAUT,
   DUREE_URL_CV,
+  SEUILS_SCORE_IA,
 } from '../config/constantes.js';
+import { analyserCandidature, iaDisponible } from '../services/aiMatching.service.js';
 
 /**
  * Nettoie le nom d'un fichier pour le Storage : Supabase n'accepte ni les accents,
@@ -26,6 +28,51 @@ const nettoyerNomFichier = (nom) =>
 
 /** Vérifie qu'une chaîne ressemble à une adresse email. */
 const emailValide = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+/**
+ * Vérifie une seule fois si les colonnes du Matching IA existent en base.
+ *
+ * Pourquoi ce garde-fou ? Les colonnes `score_ia` et `analyse_ia` sont ajoutées
+ * par un script SQL exécuté manuellement dans Supabase
+ * (src/scripts/migration_score_ia.sql). Tant qu'il n'a pas été lancé, tenter
+ * d'écrire dans ces colonnes ferait échouer TOUTE candidature.
+ *
+ * Le résultat est mis en cache : la vérification ne coûte qu'une requête au
+ * premier appel, puis plus rien.
+ */
+let cacheColonnesIA = null;
+
+const colonnesIaPresentes = async () => {
+  if (cacheColonnesIA !== null) return cacheColonnesIA;
+
+  const { error } = await supabase.from('Candidature').select('score_ia').limit(1);
+  cacheColonnesIA = !error;
+
+  if (!cacheColonnesIA) {
+    console.warn(
+      '⚠️  Colonnes score_ia / analyse_ia absentes : le Matching IA est ignoré.\n' +
+        '    Exécutez src/scripts/migration_score_ia.sql dans le SQL Editor de Supabase.'
+    );
+  }
+  return cacheColonnesIA;
+};
+
+/**
+ * Répartit une liste de candidatures selon leur score IA.
+ * Alimente les 3 cartes affichées en haut de l'écran « Candidatures d'une offre ».
+ */
+const repartitionParScore = (candidatures = []) => {
+  const compteur = { eleve: 0, modere: 0, faible: 0, nonAnalyse: 0 };
+
+  for (const c of candidatures) {
+    if (c.score_ia === null || c.score_ia === undefined) compteur.nonAnalyse++;
+    else if (c.score_ia > SEUILS_SCORE_IA.ELEVE) compteur.eleve++;
+    else if (c.score_ia >= SEUILS_SCORE_IA.MODERE) compteur.modere++;
+    else compteur.faible++;
+  }
+
+  return compteur;
+};
 
 /* ------------------------------------------------------------------ *
  *  PARTIE PUBLIQUE (espace Candidat)
@@ -66,7 +113,11 @@ export const creerCandidature = async (req, res, next) => {
     // --- 2. L'offre existe-t-elle et accepte-t-elle encore des candidatures ? ---
     const { data: offre } = await supabase
       .from('Offre')
-      .select('id_offre, titre, statut, date_expiration')
+      // On récupère aussi la description et les critères : ils servent de
+      // référence à l'analyse IA du CV (étape 6 bis).
+      .select(
+        'id_offre, titre, statut, date_expiration, description, competences_requises, type_contrat, annees_experience, diplome_requis, faculte_requise'
+      )
       .eq('id_offre', idOffre)
       .maybeSingle();
 
@@ -143,15 +194,32 @@ export const creerCandidature = async (req, res, next) => {
 
     // --- 7. Créer la candidature (relie Candidat + Offre + fichier CV) ---
     // Le statut initial 'En attente' est la valeur par défaut de la colonne (règle 3.3).
+    const donneesCandidature = {
+      id_offre: idOffre,
+      id_candidat: idCandidat,
+      cv_fichier: storageData.path,
+      lettre_motivation: lettre_motivation || null,
+      statut: STATUTS_CANDIDATURE.EN_ATTENTE,
+    };
+
+    // --- 7 bis. Analyse IA du CV face à l'offre (Matching) ---
+    // Cette étape ne peut PAS faire échouer la candidature : en cas de problème
+    // (clé absente, quota dépassé, PDF illisible), le service renvoie score = null
+    // et l'enregistrement se poursuit normalement. Déposer sa candidature reste
+    // la fonctionnalité prioritaire (F04/F05).
+    if (await colonnesIaPresentes()) {
+      const { score, analyse } = await analyserCandidature(
+        fichier.buffer,
+        fichier.mimetype,
+        offre
+      );
+      donneesCandidature.score_ia = score;
+      donneesCandidature.analyse_ia = analyse;
+    }
+
     const { data: candidature, error: candidatureError } = await supabase
       .from('Candidature')
-      .insert([{
-        id_offre: idOffre,
-        id_candidat: idCandidat,
-        cv_fichier: storageData.path,
-        lettre_motivation: lettre_motivation || null,
-        statut: STATUTS_CANDIDATURE.EN_ATTENTE,
-      }])
+      .insert([donneesCandidature])
       .select()
       .single();
 
@@ -255,7 +323,15 @@ export const candidaturesParOffre = async (req, res, next) => {
 
     if (statut) requete = requete.eq('statut', statut);
 
+    // Tri principal : score IA décroissant (les meilleurs profils en haut).
+    // `nullsFirst: false` place les candidatures non analysées en fin de liste.
+    // Le tri par date sert de départage entre deux scores identiques.
+    if (await colonnesIaPresentes()) {
+      requete = requete.order('score_ia', { ascending: false, nullsFirst: false });
+    }
+
     const { data, error } = await requete.order('date_candidature', { ascending: false });
+
     if (error) return next(error);
 
     // La recherche par nom porte sur la table liée Candidat : on filtre en JavaScript,
@@ -270,7 +346,14 @@ export const candidaturesParOffre = async (req, res, next) => {
       });
     }
 
-    res.json({ offre, candidatures, total: candidatures.length });
+    res.json({
+      offre,
+      candidatures,
+      total: candidatures.length,
+      // Répartition affichée dans les 3 cartes en haut de l'écran RH.
+      // Calculée sur la liste complète, avant tout filtrage par recherche.
+      repartition: repartitionParScore(data),
+    });
   } catch (err) {
     next(err);
   }
@@ -357,6 +440,106 @@ export const changerStatut = async (req, res, next) => {
     if (!data) return res.status(404).json({ error: 'Candidature non trouvée.' });
 
     res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /api/rh/offres/:id/analyser
+ * Relance l'analyse IA des candidatures d'une offre (bouton « Relancer analyse IA »).
+ *
+ * Utilité principale : scorer les candidatures enregistrées AVANT la mise en
+ * place de la fonctionnalité, qui ont donc `score_ia = null`.
+ *
+ * Paramètre optionnel : ?toutes=true pour ré-analyser aussi celles déjà scorées.
+ *
+ * Déroulé pour chaque candidature : télécharger le CV depuis le Storage,
+ * en extraire le texte, demander le score, puis mettre à jour la ligne.
+ */
+export const relancerAnalyse = async (req, res, next) => {
+  try {
+    if (!iaDisponible()) {
+      return res.status(503).json({
+        error: "Analyse IA indisponible : la clé OPENAI_API_KEY n'est pas configurée sur le serveur.",
+      });
+    }
+    if (!(await colonnesIaPresentes())) {
+      return res.status(503).json({
+        error:
+          'Colonnes score_ia / analyse_ia absentes en base. Exécutez le script ' +
+          'src/scripts/migration_score_ia.sql dans le SQL Editor de Supabase.',
+      });
+    }
+
+    const idOffre = req.params.id;
+    const toutesLesCandidatures = req.query.toutes === 'true';
+
+    // 1. Récupérer l'offre, qui sert de référence à l'analyse
+    const { data: offre, error: erreurOffre } = await supabase
+      .from('Offre')
+      .select(
+        'id_offre, titre, description, competences_requises, type_contrat, annees_experience, diplome_requis, faculte_requise'
+      )
+      .eq('id_offre', idOffre)
+      .maybeSingle();
+
+    if (erreurOffre) return next(erreurOffre);
+    if (!offre) return res.status(404).json({ error: 'Offre non trouvée.' });
+
+    // 2. Sélectionner les candidatures à traiter
+    let requete = supabase
+      .from('Candidature')
+      .select('id_candidature, cv_fichier, score_ia')
+      .eq('id_offre', idOffre);
+
+    // Par défaut on ne retraite que les candidatures jamais analysées :
+    // cela évite de consommer inutilement des appels payants à l'IA.
+    if (!toutesLesCandidatures) requete = requete.is('score_ia', null);
+
+    const { data: candidatures, error } = await requete;
+    if (error) return next(error);
+
+    // 3. Analyser chaque CV, l'un après l'autre
+    let analysees = 0;
+    let echecs = 0;
+
+    for (const candidature of candidatures) {
+      try {
+        // Télécharger le fichier depuis le bucket privé
+        const { data: fichier, error: erreurTelechargement } = await supabase.storage
+          .from(BUCKET_CV)
+          .download(candidature.cv_fichier);
+
+        if (erreurTelechargement || !fichier) {
+          echecs++;
+          continue;
+        }
+
+        // `.download()` renvoie un Blob : on le convertit en Buffer Node
+        const buffer = Buffer.from(await fichier.arrayBuffer());
+
+        const { score, analyse } = await analyserCandidature(buffer, 'application/pdf', offre);
+
+        await supabase
+          .from('Candidature')
+          .update({ score_ia: score, analyse_ia: analyse })
+          .eq('id_candidature', candidature.id_candidature);
+
+        if (score === null) echecs++;
+        else analysees++;
+      } catch (err) {
+        console.error('⚠️  Analyse échouée pour une candidature :', err.message);
+        echecs++;
+      }
+    }
+
+    res.json({
+      message: `Analyse terminée : ${analysees} candidature(s) évaluée(s).`,
+      analysees,
+      echecs,
+      total: candidatures.length,
+    });
   } catch (err) {
     next(err);
   }

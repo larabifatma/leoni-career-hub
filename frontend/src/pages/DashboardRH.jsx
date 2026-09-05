@@ -172,26 +172,39 @@ function DashboardRH() {
 
                 {offres.map((offre) => (
                   <tr key={offre.id_offre}>
-                    <td style={{ fontWeight: 500 }}>{offre.titre}</td>
+                    <td>
+                      {/* Le titre est cliquable : il mène aux candidatures de l'offre */}
+                      <Link
+                        to={`/rh/offres/${offre.id_offre}/candidatures`}
+                        style={{ fontWeight: 600 }}
+                      >
+                        {offre.titre}
+                      </Link>
+                    </td>
                     <td>{offre.type_contrat}</td>
                     <td>
                       <StatutBadge statut={offre.statut} />
                     </td>
                     <td>
-                      <Link to={`/rh/offres/${offre.id_offre}/candidatures`}>
+                      <Link
+                        to={`/rh/offres/${offre.id_offre}/candidatures`}
+                        className="compteur-candidatures"
+                      >
                         {offre.nb_candidatures}
-                      </Link>
+                      </Link>{' '}
+                      <span style={{ color: 'var(--texte-doux)', fontSize: '13px' }}>
+                        dossier{offre.nb_candidatures > 1 ? 's' : ''}
+                      </span>
                     </td>
                     <td>{formaterDate(offre.date_publication)}</td>
                     <td className="cellule-actions">
-                      <button
-                        type="button"
-                        className="bouton-icone"
-                        title="Voir les candidatures"
-                        onClick={() => navigate(`/rh/offres/${offre.id_offre}/candidatures`)}
+                      <Link
+                        to={`/rh/offres/${offre.id_offre}/candidatures`}
+                        className="bouton bouton-neutre bouton-petit"
+                        title="Consulter les candidatures reçues"
                       >
-                        👁
-                      </button>
+                        👁 Voir candidatures
+                      </Link>
                       <button
                         type="button"
                         className="bouton-icone"

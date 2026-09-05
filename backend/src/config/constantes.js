@@ -24,3 +24,14 @@ export const TAILLE_PAGE_DEFAUT = 10;
 
 /** Durée de validité d'une URL signée de téléchargement de CV (en secondes). */
 export const DUREE_URL_CV = 60 * 5; // 5 minutes
+
+/**
+ * Seuils de classement du score de Matching IA (0 à 100).
+ * Utilisés côté backend pour la répartition affichée sur le tableau de bord RH,
+ * et côté frontend pour la couleur des badges.
+ */
+export const SEUILS_SCORE_IA = {
+  ELEVE: 75,  // > 75  : profil qualifié   (badge vert)
+  MODERE: 50, // 50-75 : profil à valider  (badge orange)
+  // < 50 : profil écarté (badge rouge)
+};

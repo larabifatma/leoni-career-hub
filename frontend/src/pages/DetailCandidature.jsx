@@ -13,6 +13,7 @@ import {
   getLienCv,
 } from '../services/candidatures';
 import StatutBadge from '../components/StatutBadge';
+import ScoreIA from '../components/ScoreIA';
 import Chargement from '../components/Chargement';
 import Message from '../components/Message';
 import { formaterDate } from './DetailOffre';
@@ -70,25 +71,68 @@ function DetailCandidature() {
 
   const { Candidat: candidat, Offre: offre } = candidature;
 
+  // Initiales du candidat, affichées dans la pastille du bandeau
+  const initiales = `${candidat?.prenom?.[0] || ''}${candidat?.nom?.[0] || ''}`.toUpperCase();
+
+  // L'analyse détaillée n'existe que si l'IA a pu évaluer le CV
+  const analyse = candidature.analyse_ia;
+  const analyseReussie = analyse && !analyse.erreur;
+
   return (
     <>
+      <button
+        type="button"
+        className="lien-retour"
+        onClick={() =>
+          navigate(offre ? `/rh/offres/${offre.id_offre}/candidatures` : '/rh/candidatures')
+        }
+      >
+        ← Retour à la liste des candidatures
+      </button>
+
       <nav className="fil-ariane">
         <Link to="/rh/offres">Offres</Link>
         <span>›</span>
         <Link to={`/rh/offres/${offre?.id_offre}/candidatures`}>{offre?.titre}</Link>
+        <span>›</span>
+        <span>Candidatures</span>
         <span>›</span>
         <span aria-current="page">
           {candidat?.prenom} {candidat?.nom}
         </span>
       </nav>
 
-      <div className="rh-entete-page">
-        <h1>
-          {candidat?.prenom} {candidat?.nom}
-        </h1>
-        <button type="button" className="bouton bouton-secondaire" onClick={() => navigate(-1)}>
-          ← Retour à la liste
-        </button>
+      {/* --- Bandeau : identité du candidat + score de Matching IA --- */}
+      <div className="bandeau-candidat">
+        <div className="bandeau-candidat-identite">
+          <div className="bandeau-candidat-pastille">{initiales}</div>
+          <div>
+            <h1>
+              {candidat?.prenom} {candidat?.nom}
+            </h1>
+            <div className="bandeau-candidat-etiquettes">
+              <span className="badge badge-gris">
+                Statut actuel : {candidature.statut}
+              </span>
+              <span className="badge badge-marine">{offre?.type_contrat}</span>
+              <span style={{ fontSize: '13px', color: 'var(--texte-doux)' }}>
+                {offre?.titre}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="encadre-score">
+          <div className="encadre-score-icone">◎</div>
+          <div>
+            <div className="encadre-score-libelle">Évaluation algorithmique</div>
+            <div className="encadre-score-valeur">
+              {candidature.score_ia !== null && candidature.score_ia !== undefined
+                ? `Score Matching IA : ${candidature.score_ia}%`
+                : 'Score non calculé'}
+            </div>
+          </div>
+        </div>
       </div>
 
       <Message type="erreur">{erreur}</Message>
@@ -131,6 +175,63 @@ function DetailCandidature() {
               </div>
             </div>
           </div>
+
+          {/* --- Analyse détaillée produite par l'IA --- */}
+          {analyseReussie && (
+            <div className="carte" style={{ marginBottom: '20px' }}>
+              <h2 className="carte-titre">◎ Analyse du profil</h2>
+
+              {analyse.resume && (
+                <p style={{ marginBottom: '20px', color: '#374151' }}>{analyse.resume}</p>
+              )}
+
+              <div className="analyse-colonnes">
+                <div>
+                  <div className="analyse-titre positif">Points forts</div>
+                  <ul className="analyse-liste">
+                    {analyse.points_forts?.length ? (
+                      analyse.points_forts.map((point, index) => <li key={index}>{point}</li>)
+                    ) : (
+                      <li style={{ color: 'var(--texte-doux)' }}>Aucun point relevé</li>
+                    )}
+                  </ul>
+                </div>
+
+                <div>
+                  <div className="analyse-titre negatif">Points de vigilance</div>
+                  <ul className="analyse-liste">
+                    {analyse.points_faibles?.length ? (
+                      analyse.points_faibles.map((point, index) => <li key={index}>{point}</li>)
+                    ) : (
+                      <li style={{ color: 'var(--texte-doux)' }}>Aucun point relevé</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Rappel important : l'IA assiste, elle ne décide pas. */}
+              <p
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--texte-doux)',
+                  marginTop: '18px',
+                  paddingTop: '14px',
+                  borderTop: '1px solid var(--bordure)',
+                }}
+              >
+                Analyse générée automatiquement le {formaterDate(analyse.date_analyse)} — elle
+                constitue une aide à la décision et ne remplace pas l'évaluation du recruteur.
+              </p>
+            </div>
+          )}
+
+          {/* Message affiché quand l'analyse n'a pas pu aboutir */}
+          {analyse?.erreur && (
+            <div className="carte" style={{ marginBottom: '20px' }}>
+              <h2 className="carte-titre">◎ Analyse du profil</h2>
+              <p style={{ color: 'var(--texte-doux)' }}>{analyse.erreur}</p>
+            </div>
+          )}
 
           <div className="carte">
             <h2 className="carte-titre">📄 Lettre de motivation</h2>

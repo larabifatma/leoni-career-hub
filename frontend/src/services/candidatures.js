@@ -66,3 +66,20 @@ export const changerStatutCandidature = async (id, statut) => {
   const reponse = await api.patch(`/rh/candidatures/${id}/statut`, { statut });
   return reponse.data;
 };
+
+/* --- Matching IA (côté RH) --- */
+
+/**
+ * Relance l'analyse IA des candidatures d'une offre (bouton « Relancer analyse IA »).
+ * Par défaut, seules les candidatures jamais analysées sont traitées, pour ne pas
+ * consommer inutilement des appels payants à l'IA.
+ *
+ * @param {string} idOffre
+ * @param {boolean} toutes - true pour ré-analyser aussi celles déjà scorées
+ */
+export const relancerAnalyseIA = async (idOffre, toutes = false) => {
+  const reponse = await api.post(`/rh/offres/${idOffre}/analyser`, null, {
+    params: { toutes },
+  });
+  return reponse.data;
+};

@@ -191,3 +191,98 @@ Les CV ne sont pas stockés en base : le fichier est dans le bucket privé `cvs`
 > ⚠️ Les fichiers `.env` ne doivent jamais être envoyés sur Git : ils contiennent la
 > `service_role key` de Supabase. Ils sont exclus par `.gitignore`, et un
 > `.env.example` documente les variables attendues.
+
+
+---
+
+## 7. Module Matching IA (évolution)
+
+Analyse automatique de la correspondance entre le CV déposé et l'offre concernée.
+Chaque candidature reçoit un score de 0 à 100 et une analyse détaillée.
+
+> ⚠️ **Note de périmètre :** le cahier des charges initial exclut explicitement l'IA
+> (§1.2 et §1.3). Ce module est une **évolution ajoutée après validation**, à
+> présenter comme tel en soutenance.
+
+### Mise en service — 2 étapes
+
+**1. Créer les colonnes en base** (une seule fois)
+
+Supabase → SQL Editor → New query → coller le contenu de
+`backend/src/scripts/migration_score_ia.sql` → Run.
+
+Cela ajoute à la table `Candidature` :
+
+| Colonne | Type | Contenu |
+|---|---|---|
+| `score_ia` | `integer` nullable | Score global de 0 à 100 (`null` = non analysé) |
+| `analyse_ia` | `jsonb` nullable | Points forts, points faibles, résumé |
+
+**2. Renseigner la clé OpenAI** dans `backend/.env`
+
+```
+OPENAI_API_KEY=sk-votre_cle
+```
+
+> **Sans clé ou sans colonnes, l'application continue de fonctionner normalement.**
+> Les candidatures sont enregistrées avec `score_ia = null` et affichées « Non analysé ».
+> Le dépôt de candidature ne dépend jamais de la disponibilité de l'IA — c'est un
+> choix de conception délibéré : F04/F05 restent prioritaires.
+
+### Fonctionnement
+
+| Étape | Fichier | Rôle |
+|---|---|---|
+| 1 | `services/aiMatching.service.js` | Extrait le texte du PDF avec `pdf-parse` |
+| 2 | idem | Interroge `gpt-4o-mini` et valide la réponse JSON |
+| 3 | `controllers/candidatures.controller.js` | Enregistre `score_ia` et `analyse_ia` |
+| 4 | `pages/CandidaturesOffre.jsx` | Affiche le tri et les cartes de répartition |
+| 5 | `pages/DetailCandidature.jsx` | Affiche le score et l'analyse détaillée |
+
+**Pondération du score** (fixée dans le prompt système) : compétences techniques 50 %,
+expérience professionnelle 20 %, adéquation générale 20 %, formation et diplômes 10 %.
+
+**Format de réponse imposé au modèle :**
+
+```json
+{
+  "score": 85,
+  "points_forts": ["..."],
+  "points_faibles": ["..."],
+  "resume": "..."
+}
+```
+
+### Nouvel endpoint
+
+| Méthode | Route | Description |
+|---|---|---|
+| `POST` | `/rh/offres/:id/analyser` | Analyse les candidatures sans score. Ajouter `?toutes=true` pour tout ré-analyser. |
+
+Ce bouton (« Relancer analyse IA ») sert notamment à scorer les candidatures
+enregistrées **avant** la mise en place de la fonctionnalité.
+
+### Seuils d'affichage
+
+| Score | Niveau | Badge |
+|---|---|---|
+| > 75 % | Profil qualifié | Bleu |
+| 50 – 75 % | Profil à valider | Orange |
+| < 50 % | Profil écarté | Rouge |
+| `null` | Non analysé | Gris |
+
+Les seuils sont définis une seule fois de chaque côté : `SEUILS_SCORE_IA` dans
+`backend/src/config/constantes.js` et `SEUILS` dans `frontend/src/components/ScoreIA.jsx`.
+
+### Limites à connaître pour la soutenance
+
+- L'analyse ne fonctionne que sur les **CV au format PDF**. Un CV Word ou un PDF
+  scanné (image sans texte) est accepté par l'application mais reste non scoré.
+- Le score est une **aide à la décision**, jamais une décision automatique :
+  le Responsable RH garde seul la main sur le statut de la candidature.
+- Le prompt interdit explicitement au modèle de tenir compte de critères
+  discriminatoires (genre, âge, origine) et de suivre des instructions qui
+  seraient dissimulées dans un CV (*prompt injection*).
+- Chaque analyse consomme un appel **payant** à l'API OpenAI.
+- Le modèle n'est pas déterministe : `temperature: 0.2` limite les écarts, mais
+  deux analyses du même CV peuvent différer de quelques points.
