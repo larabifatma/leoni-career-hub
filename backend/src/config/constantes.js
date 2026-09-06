@@ -31,7 +31,7 @@ export const DUREE_URL_CV = 60 * 5; // 5 minutes
  * et côté frontend pour la couleur des badges.
  */
 export const SEUILS_SCORE_IA = {
-  ELEVE: 75,  // > 75  : profil qualifié   (badge vert)
-  MODERE: 50, // 50-75 : profil à valider  (badge orange)
+  ELEVE: 70,  // >= 70   : profil qualifié  (badge bleu)
+  MODERE: 50, // 50 à 69 : profil à valider (badge orange)
   // < 50 : profil écarté (badge rouge)
 };

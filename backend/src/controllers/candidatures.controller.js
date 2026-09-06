@@ -66,7 +66,7 @@ const repartitionParScore = (candidatures = []) => {
 
   for (const c of candidatures) {
     if (c.score_ia === null || c.score_ia === undefined) compteur.nonAnalyse++;
-    else if (c.score_ia > SEUILS_SCORE_IA.ELEVE) compteur.eleve++;
+    else if (c.score_ia >= SEUILS_SCORE_IA.ELEVE) compteur.eleve++;
     else if (c.score_ia >= SEUILS_SCORE_IA.MODERE) compteur.modere++;
     else compteur.faible++;
   }

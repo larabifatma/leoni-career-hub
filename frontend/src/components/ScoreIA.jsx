@@ -8,8 +8,12 @@
  *   - ScoreIA      : le badge coloré affiché dans les tableaux
  */
 
-/** Seuils identiques à ceux du backend (config/constantes.js). */
-export const SEUILS = { ELEVE: 75, MODERE: 50 };
+/**
+ * Seuils identiques à ceux du backend (config/constantes.js).
+ * Les deux bornes sont INCLUSIVES : un score de 70 est déjà « élevé »,
+ * un score de 50 est déjà « modéré ».
+ */
+export const SEUILS = { ELEVE: 70, MODERE: 50 };
 
 /**
  * Convertit un score numérique en niveau.
@@ -18,8 +22,9 @@ export const SEUILS = { ELEVE: 75, MODERE: 50 };
  */
 export const niveauScore = (score) => {
   if (score === null || score === undefined) return 'inconnu';
-  if (score > SEUILS.ELEVE) return 'eleve';
-  if (score >= SEUILS.MODERE) return 'modere';
+  if (score >= SEUILS.ELEVE) return 'eleve';   // 70 à 100 : badge bleu
+  if (score >= SEUILS.MODERE) return 'modere'; // 50 à 69  : badge orange
+  // 0 à 49 : badge rouge
   return 'faible';
 };
 

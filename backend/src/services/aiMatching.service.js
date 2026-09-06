@@ -40,8 +40,13 @@ const estOpenRouter = cleBrute.startsWith('sk-or-');
 const URL_API = process.env.OPENAI_BASE_URL || (estOpenRouter ? 'https://openrouter.ai/api/v1' : undefined);
 
 /**
- * Modèle utilisé : rapide et peu coûteux, suffisant pour une analyse de CV.
- * OpenRouter exige un nom préfixé par l'éditeur ("openai/gpt-4o-mini").
+ * Modèle utilisé pour l'analyse, défini par la variable IA_MODELE.
+ *
+ * OpenRouter exige un nom préfixé par l'éditeur ("openai/gpt-4o-mini"), et le
+ * suffixe ":free" désigne un modèle gratuit. Le projet utilise un modèle
+ * gratuit pour ne dépendre d'aucun crédit payant.
+ *
+ * La valeur par défaut ci-dessous ne sert que si IA_MODELE est absent du .env.
  */
 const MODELE = process.env.IA_MODELE || (estOpenRouter ? 'openai/gpt-4o-mini' : 'gpt-4o-mini');
 
@@ -144,6 +149,48 @@ Réponds EXCLUSIVEMENT avec un objet JSON valide respectant exactement cette str
 "score" est un entier entre 0 et 100. "points_forts" et "points_faibles" contiennent chacun 2 à 4 éléments courts.`;
 
 /**
+ * Extrait l'objet JSON de la réponse du modèle.
+ *
+ * Pourquoi ce nettoyage ? Tous les modèles ne respectent pas strictement la
+ * consigne `response_format: json_object`. Certains encadrent leur réponse
+ * dans un bloc de code Markdown :
+ *
+ *     ```json
+ *     { "score": 90, ... }
+ *     ```
+ *
+ * `JSON.parse()` échouerait sur les backticks. On retire donc ces marqueurs,
+ * puis on ne conserve que ce qui se trouve entre la première accolade ouvrante
+ * et la dernière accolade fermante. Le code reste ainsi compatible avec
+ * n'importe quel modèle, pas seulement celui utilisé aujourd'hui.
+ */
+const extraireJSON = (texte) => {
+  // Garde-fou : on ne lance JAMAIS JSON.parse() sur autre chose qu'une chaîne
+  // non vide. Un modèle peut renvoyer null, undefined ou une chaîne d'espaces ;
+  // JSON.parse() planterait alors avec un message technique illisible.
+  if (typeof texte !== 'string' || !texte.trim()) {
+    throw new Error('Réponse vide ou non textuelle du modèle.');
+  }
+
+  const nettoye = texte.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+  const debut = nettoye.indexOf('{');
+  const fin = nettoye.lastIndexOf('}');
+
+  if (debut === -1 || fin === -1) throw new Error('Aucun objet JSON dans la réponse.');
+
+  const objet = JSON.parse(nettoye.slice(debut, fin + 1));
+
+  // JSON.parse("null") renvoie null sans lever d'erreur : on le refuse ici,
+  // pour que validerAnalyse() ne reçoive jamais autre chose qu'un objet.
+  if (!objet || typeof objet !== 'object') {
+    throw new Error('La réponse du modèle ne contient pas un objet exploitable.');
+  }
+
+  return objet;
+};
+
+/**
  * Garantit que la réponse du modèle est exploitable, même si celui-ci
  * s'écarte du format demandé. On ne fait jamais confiance à une réponse
  * externe sans la valider — même principe que la validation des données
@@ -180,6 +227,47 @@ const resultatIndisponible = (raison) => ({
 });
 
 /**
+ * Envoie la demande au modèle, avec repli automatique.
+ *
+ * L'option `response_format: { type: 'json_object' }` demande au modèle de
+ * produire directement du JSON valide. Tous les modèles ne la prennent pas en
+ * charge : certains modèles gratuits renvoient alors une erreur 400 ou 404 du
+ * type « response_format is not supported ».
+ *
+ * Plutôt que d'imposer un modèle particulier, on procède en deux temps :
+ *   1. on tente l'appel AVEC l'option (réponse la plus fiable) ;
+ *   2. si le fournisseur la refuse, on refait l'appel SANS elle.
+ *
+ * Dans le second cas, les consignes système demandent déjà explicitement du
+ * JSON, et `extraireJSON()` se charge de nettoyer une éventuelle mise en forme
+ * Markdown. Le service reste donc compatible avec n'importe quel modèle.
+ */
+const interrogerModele = async (messages) => {
+  const options = {
+    model: MODELE,
+    // Température basse = réponses stables : deux analyses du même CV
+    // donneront des scores très proches, ce qui est indispensable ici.
+    temperature: 0.2,
+    messages,
+  };
+
+  try {
+    return await openai.chat.completions.create({
+      ...options,
+      response_format: { type: 'json_object' },
+    });
+  } catch (err) {
+    // On ne retente que si l'erreur concerne l'option elle-même.
+    // Une panne réseau ou un quota dépassé doit remonter tel quel.
+    const optionRefusee = /response_format|json_object|not supported|unsupported/i.test(err.message || '');
+    if (!optionRefusee) throw err;
+
+    console.warn(`⚠️  ${MODELE} ne gère pas response_format : nouvel essai sans cette option.`);
+    return openai.chat.completions.create(options);
+  }
+};
+
+/**
  * Demande au modèle d'évaluer un CV face à une offre.
  *
  * @param {string} texteCV        - texte brut extrait du CV
@@ -198,29 +286,27 @@ export const calculerScoreIA = async (texteCV, descriptionOffre) => {
     return resultatIndisponible('Description de l\'offre indisponible.');
   }
 
+  const messages = [
+    { role: 'system', content: CONSIGNES_SYSTEME },
+    {
+      role: 'user',
+      content:
+        `OFFRE D'EMPLOI :\n${descriptionOffre.slice(0, 4000)}\n\n` +
+        `CV DU CANDIDAT :\n${texteCV.slice(0, LONGUEUR_MAX_CV)}`,
+    },
+  ];
+
   try {
-    const reponse = await openai.chat.completions.create({
-      model: MODELE,
-      // `response_format: json_object` force le modèle à répondre en JSON valide
-      response_format: { type: 'json_object' },
-      // Température basse = réponses stables : deux analyses du même CV
-      // donneront des scores très proches, ce qui est indispensable ici.
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: CONSIGNES_SYSTEME },
-        {
-          role: 'user',
-          content:
-            `OFFRE D'EMPLOI :\n${descriptionOffre.slice(0, 4000)}\n\n` +
-            `CV DU CANDIDAT :\n${texteCV.slice(0, LONGUEUR_MAX_CV)}`,
-        },
-      ],
-    });
-
+    const reponse = await interrogerModele(messages);
+    // Vérification AVANT toute tentative de lecture du JSON : selon le modèle
+    // et selon l'erreur rencontrée, `content` peut être absent, null, ou une
+    // chaîne vide. On sort proprement dans ces trois cas.
     const contenu = reponse.choices?.[0]?.message?.content;
-    if (!contenu) return resultatIndisponible('Réponse vide du modèle.');
+    if (typeof contenu !== 'string' || !contenu.trim()) {
+      return resultatIndisponible('Réponse vide du modèle : aucune analyse exploitable.');
+    }
 
-    return validerAnalyse(JSON.parse(contenu));
+    return validerAnalyse(extraireJSON(contenu));
   } catch (err) {
     // Quota dépassé, clé invalide, panne réseau, JSON malformé...
     console.error('⚠️  Analyse IA impossible :', err.message);

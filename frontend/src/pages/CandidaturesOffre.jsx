@@ -234,14 +234,14 @@ function CandidaturesOffre() {
       {/* --- 2. Répartition par niveau de score --- */}
       <div className="grille-repartition">
         <CarteRepartition
-          libelle="Score élevé (> 75%)"
+          libelle="Score élevé (≥ 70%)"
           valeur={repartition.eleve}
           detail="profils qualifiés"
           total={total}
           couleur="eleve"
         />
         <CarteRepartition
-          libelle="Score modéré (50 - 75%)"
+          libelle="Score modéré (50 - 69%)"
           valeur={repartition.modere}
           detail="profils à valider"
           total={total}

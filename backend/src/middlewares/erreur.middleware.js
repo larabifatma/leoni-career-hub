@@ -34,6 +34,18 @@ export const gestionErreurs = (err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
+  // Corps de requête JSON illisible : express.json() lève une SyntaxError.
+  // Sans ce cas, le message technique du parseur (« Unexpected token 'n',
+  // "null" is not valid JSON ») remontait tel quel jusqu'à l'écran du RH.
+  // On renvoie à la place un message compréhensible, toujours en 400.
+  // (On teste la signature précise du parseur, et non `err instanceof SyntaxError`
+  //  seul, pour ne pas masquer en 400 une vraie erreur de programmation.)
+  if (err.type === 'entity.parse.failed' || (err instanceof SyntaxError && 'body' in err)) {
+    return res.status(400).json({
+      error: 'Requête mal formée : le corps envoyé n\'est pas un JSON valide.',
+    });
+  }
+
   res.status(err.status || 500).json({
     error: err.message || 'Une erreur interne est survenue.',
   });

@@ -218,10 +218,11 @@ Cela ajoute à la table `Candidature` :
 | `score_ia` | `integer` nullable | Score global de 0 à 100 (`null` = non analysé) |
 | `analyse_ia` | `jsonb` nullable | Points forts, points faibles, résumé |
 
-**2. Renseigner la clé OpenAI** dans `backend/.env`
+**2. Renseigner la clé et le modèle** dans `backend/.env`
 
 ```
-OPENAI_API_KEY=sk-votre_cle
+OPENAI_API_KEY=sk-or-votre_cle
+IA_MODELE=minimax/minimax-m3:free
 ```
 
 > **Sans clé ou sans colonnes, l'application continue de fonctionner normalement.**
@@ -234,7 +235,7 @@ OPENAI_API_KEY=sk-votre_cle
 | Étape | Fichier | Rôle |
 |---|---|---|
 | 1 | `services/aiMatching.service.js` | Extrait le texte du PDF avec `pdf-parse` |
-| 2 | idem | Interroge `gpt-4o-mini` et valide la réponse JSON |
+| 2 | idem | Interroge le modèle défini par `IA_MODELE` et valide la réponse JSON |
 | 3 | `controllers/candidatures.controller.js` | Enregistre `score_ia` et `analyse_ia` |
 | 4 | `pages/CandidaturesOffre.jsx` | Affiche le tri et les cartes de répartition |
 | 5 | `pages/DetailCandidature.jsx` | Affiche le score et l'analyse détaillée |
@@ -266,8 +267,8 @@ enregistrées **avant** la mise en place de la fonctionnalité.
 
 | Score | Niveau | Badge |
 |---|---|---|
-| > 75 % | Profil qualifié | Bleu |
-| 50 – 75 % | Profil à valider | Orange |
+| ≥ 70 % | Profil qualifié | Bleu |
+| 50 – 69 % | Profil à valider | Orange |
 | < 50 % | Profil écarté | Rouge |
 | `null` | Non analysé | Gris |
 
@@ -283,6 +284,8 @@ Les seuils sont définis une seule fois de chaque côté : `SEUILS_SCORE_IA` dan
 - Le prompt interdit explicitement au modèle de tenir compte de critères
   discriminatoires (genre, âge, origine) et de suivre des instructions qui
   seraient dissimulées dans un CV (*prompt injection*).
-- Chaque analyse consomme un appel **payant** à l'API OpenAI.
+- Le modèle retenu est **gratuit** (suffixe `:free`). Un modèle gratuit peut être
+  retiré du catalogue sans préavis ou renvoyer une erreur `429` en cas d'affluence :
+  deux alternatives sont commentées dans le `.env`, dont une payante en dernier recours.
 - Le modèle n'est pas déterministe : `temperature: 0.2` limite les écarts, mais
   deux analyses du même CV peuvent différer de quelques points.

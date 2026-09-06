@@ -78,7 +78,17 @@ export const changerStatutCandidature = async (id, statut) => {
  * @param {boolean} toutes - true pour ré-analyser aussi celles déjà scorées
  */
 export const relancerAnalyseIA = async (idOffre, toutes = false) => {
-  const reponse = await api.post(`/rh/offres/${idOffre}/analyser`, null, {
+  // On envoie un objet vide, et surtout PAS `null`.
+  //
+  // Pourquoi ? Notre instance Axios impose l'en-tête Content-Type: application/json
+  // à toutes les requêtes. Avec `null`, Axios sérialise quand même le corps et
+  // envoie les 4 caractères « null ». Or express.json() fonctionne en mode strict :
+  // il n'accepte qu'un objet ou un tableau, et rejette « null » avec l'erreur
+  // « Unexpected token 'n', "null" is not valid JSON » (HTTP 400).
+  //
+  // Toutes les informations utiles voyagent dans l'URL (l'identifiant de l'offre
+  // et le paramètre `toutes`) : le corps est donc simplement vide.
+  const reponse = await api.post(`/rh/offres/${idOffre}/analyser`, {}, {
     params: { toutes },
   });
   return reponse.data;

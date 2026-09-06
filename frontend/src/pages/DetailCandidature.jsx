@@ -18,6 +18,35 @@ import Chargement from '../components/Chargement';
 import Message from '../components/Message';
 import { formaterDate } from './DetailOffre';
 
+/**
+ * Retourne l'analyse de l'IA sous forme d'objet exploitable, quelle que soit
+ * la forme reçue de l'API (objet, chaîne JSON, null).
+ *
+ * Le JSON.parse() n'est tenté que sur une chaîne non vide : appelé sur `null`,
+ * il lèverait l'erreur « Unexpected token 'n', "null" is not valid JSON ».
+ * En cas de contenu illisible, on renvoie `null` : la page affiche alors
+ * simplement « Non analysé » au lieu de planter.
+ *
+ * @param {object|string|null} valeur - le contenu brut de la colonne analyse_ia
+ * @returns {object|null}
+ */
+function lireAnalyse(valeur) {
+  if (!valeur) return null;
+  if (typeof valeur === 'object') return valeur;
+
+  if (typeof valeur === 'string') {
+    if (!valeur.trim()) return null;
+    try {
+      const objet = JSON.parse(valeur);
+      return objet && typeof objet === 'object' ? objet : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function DetailCandidature() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -74,8 +103,13 @@ function DetailCandidature() {
   // Initiales du candidat, affichées dans la pastille du bandeau
   const initiales = `${candidat?.prenom?.[0] || ''}${candidat?.nom?.[0] || ''}`.toUpperCase();
 
-  // L'analyse détaillée n'existe que si l'IA a pu évaluer le CV
-  const analyse = candidature.analyse_ia;
+  // L'analyse détaillée n'existe que si l'IA a pu évaluer le CV.
+  // `analyse_ia` peut arriver sous trois formes :
+  //   - un objet   : cas normal, la colonne est de type jsonb
+  //   - null       : candidature jamais analysée
+  //   - une chaîne : si la colonne avait été créée en type text
+  // On ne lit donc jamais la valeur sans l'avoir vérifiée au préalable.
+  const analyse = lireAnalyse(candidature.analyse_ia);
   const analyseReussie = analyse && !analyse.erreur;
 
   return (
